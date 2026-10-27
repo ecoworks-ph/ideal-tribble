@@ -38,6 +38,7 @@
       quests: {}, // id -> {progress, done, claimed}
       areas: { courtyard: { unlocked: true, cleared: 0 } },
       bestWave: 0,
+      regionClaims: {}, // region id -> star milestones claimed
       shop: { stock: [], seed: 0 },
       stats: { kills: 0, deaths: 0, broken: 0, bossKills: 0 },
       settings: G.defaultSettings(),
@@ -440,7 +441,11 @@
     p.areas = { courtyard: { unlocked: true, cleared: 0 } };
     if (raw.areas) G.AREAS.forEach((a) => {
       const s = raw.areas[a.id];
-      if (s && typeof s === 'object') p.areas[a.id] = { unlocked: !!s.unlocked || a.id === 'courtyard', cleared: Math.floor(num(s.cleared, 0, 0, 1e6)) };
+      if (s && typeof s === 'object') {
+        p.areas[a.id] = { unlocked: !!s.unlocked || a.id === 'courtyard', cleared: Math.floor(num(s.cleared, 0, 0, 1e6)), starMask: Math.floor(num(s.starMask, 0, 0, 7)) };
+        if (s.best != null) p.areas[a.id].best = Math.floor(num(s.best, 0, 0, 1e6));
+        if (p.areas[a.id].cleared > 0 && !p.areas[a.id].starMask) p.areas[a.id].starMask = 1; // cleared before stars existed: star 1
+      }
     });
     // world expansion (20 areas in order): an area is open if it was cleared or it comes right after the furthest cleared one
     if (!raw.gm) {
@@ -452,6 +457,8 @@
       });
     }
     p.bestWave = Math.floor(num(raw.bestWave, 0, 0, 1e5));
+    p.regionClaims = {};
+    if (raw.regionClaims && typeof raw.regionClaims === 'object') G.REGIONS.forEach((r) => { const n = Math.floor(num(raw.regionClaims[r.id], 0, 0, 3)); if (n) p.regionClaims[r.id] = n; });
     p.shop = { stock: [], seed: 0 };
     if (raw.shop && Array.isArray(raw.shop.stock)) p.shop.stock = raw.shop.stock.map(sanitizeItem).filter((i) => i && i.kind === 'gear').slice(0, 6);
     if (raw.stats) Object.keys(p.stats).forEach((k) => (p.stats[k] = Math.floor(num(raw.stats[k], 0, 0, 1e9))));

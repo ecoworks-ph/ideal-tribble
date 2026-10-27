@@ -247,6 +247,31 @@
     return c;
   }
 
+  const STAR_PATH = 'M12 2.5l2.8 6.3 6.9.6-5.2 4.6 1.6 6.8L12 17.3l-6.1 3.5 1.6-6.8-5.2-4.6 6.9-.6z';
+  function starSvg(on, cls) { return `<svg class="star${on ? ' on' : ''}${cls ? ' ' + cls : ''}" viewBox="0 0 24 24" aria-hidden="true"><path d="${STAR_PATH}"/></svg>`; }
+  ui.starSvg = starSvg;
+  function starsRow(mask, cls) { return `<span class="stars ${cls || ''}" aria-label="${G.objectives.count(mask)} of 3 stars">${[1, 2, 4].map((b) => starSvg(mask & b)).join('')}</span>`; }
+
+  // the area brief: what to do, the three stars, then Enter
+  function areaBrief(a) {
+    const p = G.profile, st = p.areas[a.id] || {}, mask = G.objectives.mask(st), def = G.AREA_OBJ[a.id], card = $('sheet-card');
+    card.innerHTML = ''; card.classList.remove('menu-card');
+    const lines = G.objectives.starLines(a);
+    card.appendChild(el(`<div class="brief">
+      <div class="brief-head"><h4>${esc(a.name)}</h4><span class="chip obj-${def.type}">${G.OBJ_LABEL[def.type]}</span></div>
+      <p class="brief-goal">${esc(G.objectives.goal(a))}</p>
+      <p class="note">${esc(G.objectives.detail(a))}</p>
+      <div class="brief-stars">${lines.map((l, i) => `<div class="bs${mask & (1 << i) ? ' got' : ''}">${starSvg(mask & (1 << i))}<span>${esc(l.label)}</span></div>`).join('')}</div>
+      <div class="brief-meta"><span class="chip ${p.level >= a.level ? 'ok' : 'warn'}">Rec. Lv ${a.level}</span>${st.best != null && def.type !== 'survive' ? `<span class="chip">Best ${G.mmss(st.best)}</span>` : ''}${mask === 7 ? '<span class="chip ok">Star chest claimed</span>' : '<span class="chip chip-chest">3 stars: star chest</span>'}</div>
+      ${p.level < a.level - 1 ? `<p class="note warn-note">You are level ${p.level}. This area is meant for level ${a.level}.</p>` : ''}
+    </div>`));
+    const acts = el('<div class="sheet-actions" style="margin-top:12px"></div>');
+    acts.appendChild(btn('Close', 'ghost', closeSheet));
+    acts.appendChild(btn('Enter', 'primary', () => { closeSheet(); ui.show('hud'); G.game.startArea(a.id); }));
+    card.appendChild(acts);
+    $('sheet').hidden = false;
+  }
+
   function areaCard(a) {
     const p = G.profile;
     const st = p.areas[a.id];
@@ -256,17 +281,19 @@
     const lvClass = p.level >= a.level ? 'ok' : 'warn';
     const prevName = G.AREAS[G.AREAS.indexOf(a) - 1];
     const elite = (a.waves || []).some((w) => w.some((e) => e[2]));
+    const def = G.AREA_OBJ[a.id], mask = G.objectives.mask(st);
     card.innerHTML =
       '<span class="thumb"></span>' +
       `<div><h4>${esc(a.name)}</h4><p>${esc(unlocked ? a.desc : 'Clear ' + (prevName ? prevName.name : 'the previous area') + ' to unlock.')}</p>` +
       `<div class="meta"><span class="chip ${lvClass}">Rec. Lv ${a.level}</span>` +
-      (a.endless ? `<span class="chip">Best wave ${p.bestWave}</span>` : `<span class="chip">${a.waves.length} waves</span>`) +
-      (a.boss ? `<span class="chip boss">Boss</span>` : elite ? `<span class="chip elite">Elite</span>` : '') +
-      (st && st.cleared ? `<span class="chip ok">Cleared ×${st.cleared}</span>` : '') + '</div></div>';
+      (a.endless ? `<span class="chip">Best wave ${p.bestWave}</span>` : def ? `<span class="chip obj-${def.type}">${G.OBJ_LABEL[def.type]}</span>` : `<span class="chip">${a.waves.length} waves</span>`) +
+      (!def && a.boss ? `<span class="chip boss">Boss</span>` : !def && elite ? `<span class="chip elite">Elite</span>` : '') + '</div></div>' +
+      (def && unlocked ? starsRow(mask, 'card-stars') : '');
     if (unlocked) card.querySelector('.thumb').replaceWith(thumbCopy(a));
     card.addEventListener('click', () => {
       if (!unlocked) { ui.toast('Locked — clear the previous area first', 'warn'); return; }
       if (!p.path) { ui.toast('Choose your path first', 'skill'); ui.open('skills'); return; }
+      if (def) { areaBrief(a); return; }
       const go = () => { ui.show('hud'); G.game.startArea(a.id); };
       if (p.level < a.level - 1) ui.confirm('This area is recommended for level ' + a.level + '. Enter anyway?', go, { yes: 'Enter' });
       else go();
@@ -306,10 +333,25 @@
       const isOpen = ui.regionOpen[r.id] != null ? ui.regionOpen[r.id] : r === newest;
       const head = document.createElement('button');
       head.className = 'region-head';
-      head.innerHTML = `<div><h3>${esc(r.name)}</h3><p>Lv ${r.levels[0]} to ${r.levels[1]}, ${cleared} of ${areas.length} cleared</p></div><span class="region-arrow">${isOpen ? '▾' : '▸'}</span>`;
+      const rs = G.objectives.regionStars(p, r), rmax = G.objectives.regionMax(r);
+      head.innerHTML = `<div><h3>${esc(r.name)}</h3><p>Lv ${r.levels[0]} to ${r.levels[1]}, ${cleared} of ${areas.length} cleared</p></div><span class="region-stars">${starSvg(true)}${rs}/${rmax}</span><span class="region-arrow">${isOpen ? '▾' : '▸'}</span>`;
       head.style.setProperty('--rc', r.color); head.prepend(regionArt(r));
       head.onclick = () => { ui.regionOpen[r.id] = !isOpen; ui.refreshHub(); };
       sec.appendChild(head);
+      const step = p.regionClaims[r.id] || 0, need = G.objectives.MILESTONES[step];
+      if (need != null) {
+        const ready = rs >= need, rw = G.objectives.milestoneReward(r, step);
+        const strip = el(`<div class="milestone${ready ? ' ready' : ''}"><div class="grow"><b>${ready ? 'Reward ready' : 'Next reward at ' + need + ' stars'}</b><span>${esc(rw.text)}</span></div><div class="ms-bar"><i style="transform:scaleX(${Math.min(1, rs / need)})"></i></div></div>`);
+        if (ready) strip.appendChild(btn('Claim', 'small primary', () => {
+          const res = G.objectives.claimMilestone(p, r);
+          if (!res) return;
+          if (res.full) { ui.toast('Bag is full. Make room first.', 'warn'); return; }
+          G.save();
+          ui.toast(res.item ? 'Region reward: ' + res.item.name : 'Region reward: ' + rw.text, 'loot', res.item ? G.rarityOf(res.item).color : undefined);
+          ui.refreshHub();
+        }));
+        sec.appendChild(strip);
+      }
       if (isOpen) {
         sec.appendChild(el(`<p class="region-desc">${esc(r.desc)}</p>`));
         areas.forEach((a) => sec.appendChild(areaCard(a)));
@@ -405,8 +447,14 @@
       if (run.phase === 'shrine') line = head + 'Touch the shrine';
       else if (run.phase === 'roomclear') line = head + 'Door open, go north';
       else line = head + (rt === 'elite' ? 'Defeat the elite' : rt === 'boss' ? 'Boss room' : 'Clear the room') + ` · Foes ${alive}`;
-    } else line = `<b>Wave ${Math.max(1, Math.min(a.waves.length, run.waveIdx + 1))}/${a.waves.length}</b> · Foes ${alive}`;
-    const qs = G.QUESTS.filter((q) => G.questAvailable(p, q) && !(p.quests[q.id] && p.quests[q.id].claimed)).slice(0, 2);
+    } else line = (run.obj && G.objectives.trackerLine(run)) || `<b>Wave ${Math.max(1, Math.min(a.waves.length, run.waveIdx + 1))}/${a.waves.length}</b> · Foes ${alive}`;
+    const def = G.AREA_OBJ[a.id];
+    if (def && run.obj && !run.room && run.phase !== 'cleared' && run.phase !== 'victory') {
+      const ok = G.objectives.liveChallenge(run), t = run.time;
+      const timeLine = def.type === 'survive' ? '' : `<span class="${t <= def.par ? 'ok' : 'bad'}">${starSvg(t <= def.par, 'mini')} ${G.mmss(t)} / ${G.mmss(def.par)}</span> `;
+      line += `<br>${timeLine}<span class="${ok === false ? 'bad' : 'ok'}">${starSvg(ok !== false, 'mini')} ${esc(G.objectives.challengeText(a))}</span>`;
+    }
+    const qs = G.QUESTS.filter((q) => G.questAvailable(p, q) && !(p.quests[q.id] && p.quests[q.id].claimed)).slice(0, run.obj ? 1 : 2);
     let html = line;
     qs.forEach((q) => {
       const st = G.questState(p, q);
@@ -1068,11 +1116,20 @@
     body.innerHTML = '';
     const win = result === 'victory';
     const title = win ? 'Victory!' : result === 'defeat' ? 'Defeated' : result === 'endless' ? 'Trial Over' : 'Retreated';
-    const sub = win ? run.area.name + ' cleared' : result === 'defeat' ? 'You fell in ' + run.area.name + '. Your loot and experience are kept.' :
+    const sub = win ? run.area.name + ' cleared' : result === 'defeat' ? (run.failReason ? run.failReason + ' ' : 'You fell in ' + run.area.name + '. ') + 'Your loot and experience are kept.' :
       result === 'endless' ? 'You reached wave ' + (r.wave || 0) + ' (best ' + p.bestWave + ')' : 'You left ' + run.area.name + '.';
     body.appendChild(el(`<div class="result-head ${win || result === 'endless' ? 'win' : 'lose'}"><h2>${title}</h2><p class="note">${esc(sub)}</p></div>`));
+    if (win && r.stars) {
+      const lines = G.objectives.starLines(run.area);
+      const box = el(`<div class="result-stars">${lines.map((l, i) => {
+        const now = r.stars.got[i], had = r.stars.before & (1 << i);
+        return `<div class="rs${now || had ? ' got' : ''}${now && !had ? ' new' : ''}" style="--d:${0.25 + i * 0.35}s">${starSvg(now || had)}<span>${esc(l.label)}</span>${now && !had ? '<em>New</em>' : !now && had ? '<em class="kept">Earned before</em>' : ''}</div>`;
+      }).join('')}</div>`);
+      body.appendChild(box);
+      if (r.starChest) body.appendChild(el(`<div class="star-chest">${starSvg(true)}<div><b>Star chest</b><span>${esc(r.starChest.item.name)} and ${fmt(r.starChest.gold)} gold</span></div></div>`));
+    }
     const list = el('<div class="result-list"></div>');
-    [['Enemies defeated', r.kills], ['Experience', '+' + fmt(r.xp)], ['Gold', '+' + fmt(r.gold)]].forEach(([k, v]) => list.appendChild(el(`<div class="stat"><span>${k}</span><b>${v}</b></div>`)));
+    [['Enemies defeated', r.kills], ...(win && r.stars && G.AREA_OBJ[run.area.id].type !== 'survive' ? [['Time', G.mmss(r.stars.time)]] : []), ['Experience', '+' + fmt(r.xp)], ['Gold', '+' + fmt(r.gold)]].forEach(([k, v]) => list.appendChild(el(`<div class="stat"><span>${k}</span><b>${v}</b></div>`)));
     if (r.levels) list.appendChild(el(`<div class="stat"><span>Levels gained</span><b>+${r.levels} (now ${p.level})</b></div>`));
     if (r.unlocked) list.appendChild(el(`<div class="stat"><span>New area</span><b>${esc(r.unlocked)}</b></div>`));
     body.appendChild(list);

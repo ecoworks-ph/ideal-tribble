@@ -700,3 +700,53 @@ html, body, * { scrollbar-width: none; -ms-overflow-style: none; }
 .tip-row span { display: block; font-size: 12px; color: #c9c0ec; line-height: 1.35; margin-top: 2px; }
 .tip-row .btn { flex: none; max-width: 46%; white-space: normal; line-height: 1.1; min-height: 36px; }
 .sheet-actions > .btn:only-child { grid-column: 1 / -1; width: 100%; }
+
+/* ---- Objectives and stars */
+.star { width: 16px; height: 16px; flex: none; fill: #3a2f66; stroke: #5a4c94; stroke-width: 1.2; }
+.star.on { fill: #ffc23d; stroke: #b86a00; filter: drop-shadow(0 0 3px rgba(255,194,61,.55)); }
+.stars { display: inline-flex; gap: 2px; }
+.area-card { position: relative; }
+.card-stars { position: absolute; top: 8px; right: 8px; }
+.card-stars .star { width: 15px; height: 15px; }
+.chip.obj-slay { background: #33246e; color: #d9d0ff; }
+.chip.obj-defend { background: #0e786e; color: #d8fff6; }
+.chip.obj-bounty { background: #8a2a7a; color: #ffe0f6; }
+.chip.obj-survive { background: #9a5a10; color: #fff0d0; }
+.chip.obj-traps { background: #2a6a30; color: #e0ffd8; }
+.chip.obj-boss { background: #9a1c3a; color: #ffe0e6; }
+.chip.chip-chest { background: rgba(255,194,61,.18); color: #ffd98a; }
+.region-stars { display: inline-flex; align-items: center; gap: 4px; margin-left: auto; margin-right: 8px; font-weight: 900; font-size: 13px; color: #ffe3a0; position: relative; z-index: 2; text-shadow: 0 1px 2px #000; }
+.region-stars .star { width: 14px; height: 14px; }
+.milestone { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 6px 0 8px; padding: 9px 12px; background: #1c1440; clip-path: var(--cut6); }
+.milestone.ready { background: linear-gradient(90deg, rgba(255,194,61,.22), #1c1440 70%); }
+.milestone b { display: block; font-size: 13px; }
+.milestone span { display: block; font-size: 12px; color: #c9c0ec; }
+.milestone .ms-bar { flex-basis: 100%; order: 3; height: 4px; background: #0d0a22; }
+.milestone .ms-bar i { display: block; height: 100%; background: linear-gradient(90deg, #ffc23d, #ff8a3d); transform-origin: left; }
+.milestone .btn { flex: none; }
+.brief-head { display: flex; align-items: center; gap: 8px; }
+.brief-head h4 { margin: 0; }
+.brief-goal { margin: 8px 0 2px; font-weight: 900; font-size: 16px; color: #ffd98a; }
+.brief-stars { display: flex; flex-direction: column; gap: 6px; margin: 10px 0; padding: 10px 12px; background: #0d0a22; clip-path: var(--cut6); }
+.brief-stars .bs { display: flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 700; color: #c9c0ec; }
+.brief-stars .bs.got { color: #fbf4ff; }
+.brief-stars .star { width: 18px; height: 18px; }
+.brief-meta { display: flex; flex-wrap: wrap; gap: 6px; }
+.warn-note { color: #ffb36b !important; margin-top: 8px; }
+.tracker .ok { color: #c9f5d8; } .tracker .bad { color: #ff9a8a; text-decoration: line-through; text-decoration-thickness: 1px; }
+.star.mini { width: 11px; height: 11px; vertical-align: -1px; }
+.result-stars { display: flex; flex-direction: column; gap: 6px; margin: 4px 0 10px; padding: 10px 12px; background: #0d0a22; clip-path: var(--cut6); }
+.result-stars .rs { display: flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 700; color: #8a80b0; }
+.result-stars .rs.got { color: #fbf4ff; }
+.result-stars .star { width: 22px; height: 22px; }
+.result-stars .rs.got .star { animation: starpop .5s cubic-bezier(.2,1.6,.4,1) both; animation-delay: var(--d); }
+.result-stars em { margin-left: auto; font-style: normal; font-size: 11px; font-weight: 900; color: #3a1a00; background: #ffc23d; padding: 1px 7px; border-radius: 8px; }
+.result-stars em.kept { background: #33246e; color: #c9c0ec; }
+@keyframes starpop { 0% { transform: scale(0) rotate(-40deg); opacity: 0; } 100% { transform: scale(1) rotate(0); opacity: 1; } }
+.star-chest { display: flex; align-items: center; gap: 10px; margin: 0 0 10px; padding: 10px 12px; background: linear-gradient(90deg, rgba(255,194,61,.25), #241a4a); clip-path: var(--cut6); }
+.star-chest .star { width: 26px; height: 26px; }
+.star-chest b { display: block; color: #ffd98a; }
+.star-chest span { display: block; font-size: 13px; color: #fbf4ff; }
+
+.bossbar { top: calc(150px + var(--safe-t)); }
+.tracker .ok, .tracker .bad { display: inline-block; }

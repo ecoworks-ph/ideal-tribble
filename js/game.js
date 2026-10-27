@@ -140,10 +140,11 @@
     // hero spawn: one short thunder crack on the warp's brightest frame (#6 of 12 at 15fps = 0.4s); the clip peaks 0.25s in
     schedule(run, 0.15, () => G.sfx('heroSpawn', { minGap: 0 }));
     }
+    run.obj = G.objectives ? G.objectives.init(run) : null; // area objective (defend, bounty, survive, traps) and star tracking
     game.run = run;
     game.paused = false;
     G.ui.onRunStart(run);
-    G.ui.banner(area.name, area.endless ? 'Survive as long as you can' : roomDef ? roomTitle(run) : 'Defeat every wave');
+    G.ui.banner(area.name, roomDef ? roomTitle(run) : G.objectives ? G.objectives.goal(area) : 'Defeat every wave');
     return true;
   };
 
@@ -223,7 +224,7 @@
       if (!e.guardTxt || run.time - e.guardTxt > 0.8) { e.guardTxt = run.time; text(run, e.x, e.y - 50, 'GUARD', '#9fd0ff'); }
     }
     e.hp -= dmg;
-    e.flash = 0.12;
+    e.flash = 0.12; e.lastHurt = run.time;
     text(run, e.x, e.y - (e.boss ? 56 : 30), String(dmg), o.crit ? '#ffd54a' : o.skill ? '#8fdcff' : '#ffffff', o.crit);
     if (o.knock && !e.boss) { const a = Math.atan2(e.y - run.player.y, e.x - run.player.x); e.knock.x += Math.cos(a) * o.knock; e.knock.y += Math.sin(a) * o.knock; }
     if (e.hp <= 0) { killEnemy(run, e); return dmg; }
@@ -254,7 +255,7 @@
     if (e.boss) {
       p.stats.bossKills++;
       G.questEvent('boss', e.id, 1);
-      G.ui.bossBar(null);
+      if (!run.boss || run.boss === e || run.boss.dead) G.ui.bossBar(null);
       run.shake = 8;
       fx(run, 'hitHeavy', e.x, e.y - 20, { scale: 1.5, important: true });
       // boss loot: 2 guaranteed items, high rarity
@@ -297,13 +298,14 @@
 
   function damagePlayer(run, mult, src, o) {
     const pl = run.player;
-    if (pl.dead || run.phase === 'victory') return;
+    if (pl.dead || run.phase === 'victory' || run.phase === 'defeat') return;
     if (pl.parry && pl.parry.t > 0) { sheathCounter(run, src); return; }
     if (pl.invuln > 0) return;
     o = o || {};
     const r = rollDamage(src.atk, mult, pl.stats.def, 0, 1);
     if (pl.stats.dmgReduce) { r.dmg = Math.max(1, Math.round(r.dmg * (1 - pl.stats.dmgReduce))); if (G.profile.path === 'limitless') fx(run, 'sparkleBlue', pl.x, pl.y - 16, { scale: 0.5, fps: 30 }); } // Infinity shimmer (Gojo only)
     pl.hp -= r.dmg;
+    if (run.stat) { run.stat.dmg += r.dmg; if (o.trap) run.stat.trap++; if (src && src.boss && !src.elite && mult >= 1.25) run.stat.heavy++; }
     pl.invuln = 0.35; pl.flash = 0.25; pl.lastHit = run.time;
     text(run, pl.x, pl.y - 34, String(r.dmg), '#ff6b6b');
     if (pl.hp > 0) G.voice('hurt', { chance: 0.45, minGap: 1200, vol: 0.8 });
@@ -450,6 +452,7 @@
     if (kind === 'mp' && pl.mp >= pl.stats.maxMp) { G.ui.toast('MP is already full', 'warn'); return false; }
     if (!G.removeConsumable(p, key, 1)) { G.ui.toast('No ' + G.CONSUMABLES[key].name + 's left', 'warn'); return false; }
     pl.potionCd = C.POTION.cooldown;
+    if (run.stat) run.stat.potions++;
     if (kind === 'hp') {
       const h = Math.round(pl.stats.maxHp * C.POTION.hp * (pl.stats.potionMult || 1));
       pl.hp = Math.min(pl.stats.maxHp, pl.hp + h);
@@ -878,6 +881,12 @@
     drawSheet, damageEnemy, applyStatus, text, rollDamage, dist, setAnim, resolvePlayerHit,
   };
 
+  // internals that objectives.js needs
+  game._objApi = {
+    spawnEnemy, makeElite, damagePlayer, damageEnemy, applyStatus, setAnim, startEnemyAttack, areaCleared, text,
+    fx: (run, key, x, y, o) => fx(run, key, x, y, o), banner: (a, b) => G.ui.banner(a, b),
+  };
+
   // hook kept for sword hits (no on-hit passives in this kit)
   function swordHitPassives() {}
 
@@ -972,6 +981,7 @@
       case 'attack': {
         if (!e.hitDone && ai.frame >= e.hitFrame) {
           e.hitDone = true;
+          if (e.atkObj) { e.atkObj = false; G.objectives.hitObject(run, e); } else
           if (e.atkKind === 'shoot') {
             const a = Math.atan2(pl.y - 6 - (e.y - 9 * def.scale), pl.x - e.x);
             run.projectiles.push({ x: e.x + e.face * 10, y: e.y - 9 * def.scale, vx: Math.cos(a) * def.arrowSpeed, vy: Math.sin(a) * def.arrowSpeed, a, life: 1.6, src: e, mult: 1 });
@@ -1028,6 +1038,7 @@
 
     // ---- chase / decide
     if (pl.dead) { setAnim(e, 'idle'); return; }
+    if (run.obj && G.objectives.think(run, e, d, moveToward, slow)) return; // defend targets, the fleeing bounty
     if (e.ai === 'warlord' && e.special <= 0 && d < 90) {
       e.special = rnd(5.5, 7) / enr; e.state = 'telegraph'; e.stateT = 0; e.next = 'slam';
       fx(run, 'alert', e.x, e.y, { follow: e, offY: -def.ay * def.scale * 0.32 - 14, important: true });
@@ -1171,6 +1182,7 @@
 
   function nextWave(run) {
     const area = run.area;
+    if (run.obj && run.obj.type === 'survive') return; // the survive clock spawns and ends the area itself
     run.waveIdx++;
     if (area.endless) {
       const n = run.waveIdx + 1;
@@ -1206,7 +1218,8 @@
     e.def = Object.assign({}, e.def, { name: m.label + ' ' + e.def.name, scale: e.def.scale * m.scale, speed: e.def.speed * m.speed, radius: Math.round(e.def.radius * m.scale) });
     e.r = e.def.radius; e.maxHp = e.hp = Math.round(e.hp * m.hp); e.atk *= m.atk; e.xp *= 3; e.gold = [e.gold[0] * 3, e.gold[1] * 3];
     e.elite = modId; e.phase2 = true; // no boss enrage for elites
-    e.boss = true; run.boss = e; G.ui.bossBar(e); // show its health bar like a boss
+    e.boss = true;
+    if (!(run.boss && run.boss.bounty && !run.boss.dead)) { run.boss = e; G.ui.bossBar(e); } // show its health bar like a boss
   }
   function roomCleared(run) {
     if (run.phase === 'roomclear') return;
@@ -1263,7 +1276,7 @@
   function areaCleared(run) {
     if (run.room && run.room.type !== 'boss') { roomCleared(run); return; }
     if (run.phase === 'cleared' || run.phase === 'victory') return;
-    run.phase = 'cleared'; run.clearT = 0;
+    run.phase = 'cleared'; run.clearT = 0; run.doneT = run.time;
     const pl = run.player;
     fx(run, 'complete', pl.x, pl.y - 48, { follow: pl, offY: -48, important: true });
     if (run.map.chest) {
@@ -1304,6 +1317,20 @@
       if (next && !(p.areas[next.id] && p.areas[next.id].unlocked)) { p.areas[next.id] = { unlocked: true, cleared: 0 }; unlocked = next.name; }
       G.questEvent('clear', area.id, 1);
       run.rewards.unlocked = unlocked;
+      const ev = G.objectives && G.objectives.evaluate(run);
+      if (ev) {
+        const before = st.starMask || 0;
+        st.starMask = before | ev.mask;
+        if (st.best == null || ev.time < st.best) st.best = Math.round(ev.time);
+        run.rewards.stars = { got: ev.got, before, after: st.starMask, time: ev.time };
+        if (before !== 7 && st.starMask === 7) { // first time at 3 stars: the star chest
+          const rar = Math.random() < 0.3 ? 'epic' : 'rare';
+          const item = G.makeItem(null, rar, area.level + 2), gold = 30 * area.level + 60;
+          p.gold += gold; run.rewards.gold += gold;
+          if (G.addGear(p, item)) run.rewards.items.push(item);
+          run.rewards.starChest = { item, gold };
+        }
+      }
     }
     if (area.endless) run.rewards.wave = run.endWave;
     G.refreshQuests();
@@ -1361,7 +1388,7 @@
       if (pl.state === 'attack' && pl.skillSwing && !pl.dash) {
         const mv = Math.hypot(inp.mx, inp.my);
         if (mv > 0.15) {
-          const sp = pl.stats.moveSpeed * Math.min(1, mv);
+          const sp = pl.stats.moveSpeed * Math.min(1, mv) * (pl.slowMul == null ? 1 : pl.slowMul);
           pl.x += (inp.mx / Math.max(mv, 1)) * sp * dt;
           pl.y += (inp.my / Math.max(mv, 1)) * sp * dt;
           G.collide(run.map, pl, pl.r);
@@ -1372,7 +1399,7 @@
       if (pl.state !== 'attack' && !(pl.castLock > 0) && !pl.dash) {
         const mv = Math.hypot(inp.mx, inp.my);
         if (mv > 0.15) {
-          const sp = pl.stats.moveSpeed * Math.min(1, mv) * (pl.spin ? 0.6 : 1);
+          const sp = pl.stats.moveSpeed * Math.min(1, mv) * (pl.spin ? 0.6 : 1) * (pl.slowMul == null ? 1 : pl.slowMul);
           pl.x += (inp.mx / Math.max(mv, 1)) * sp * dt;
           pl.y += (inp.my / Math.max(mv, 1)) * sp * dt;
           G.collide(run.map, pl, pl.r);
@@ -1423,6 +1450,7 @@
 
     updateProjectiles(run, dt);
     updateHazards(run, dt);
+    if (G.objectives) G.objectives.update(run, dt, game._objApi);
     updateSkillZones(run, dt);
     for (const d of run.drops) d.t += dt;
     collectDrops(run);
@@ -1522,6 +1550,8 @@
     if (map.door) drawRiftDoor(ctx, map.door, run.time || 0);
     if (map.altar && !map.altar.used) drawAltarGlow(ctx, map.altar, run.time || 0);
 
+    if (run.obj) G.objectives.drawGround(ctx, run); // traps, poison pools, water
+
     // ground effects
     for (const e of run.effects) if (e.ground) drawEffect(ctx, e);
 
@@ -1532,6 +1562,7 @@
     for (const d of run.drops) list.push({ y: d.y, t: 3, o: d });
     if (run.player) list.push({ y: run.player.y, t: 2, o: run.player });
     for (const id in game.classSkills) { const c = game.classSkills[id]; if (c.drawables) c.drawables(run, list); } // {y, t: 5, draw(ctx)}
+    if (run.obj) G.objectives.drawables(run, list);
     list.sort((a, b) => a.y - b.y);
     const pl = run.player;
     for (const it of list) {
@@ -1598,7 +1629,8 @@
   function dirRow(e, run) {
     if (e.state === 'dead' || e.state === 'spawn' && e.row != null) return e.row || 0;
     const pl = run.player;
-    let dx = pl.x - e.x, dy = pl.y - e.y;
+    const tg = e.lookAt || pl;
+    let dx = tg.x - e.x, dy = tg.y - e.y;
     if (e.status && e.status.fear) { dx = -dx; dy = -dy; }
     if (e.state === 'lunge' && e.lungeA != null) { dx = Math.cos(e.lungeA); dy = Math.sin(e.lungeA); }
     const cur = e.row == null ? 0 : e.row, horiz = cur >= 2;
