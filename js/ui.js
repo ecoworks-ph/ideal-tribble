@@ -983,6 +983,81 @@
     body.appendChild(st);
   }
 
+  // ---- name tooltip: hover on PC, press and hold (or tap) on touch
+  let tipEl = null, tipTimer = 0, tipHide = 0;
+  function tipShow(target, html) {
+    if (!tipEl) { tipEl = document.createElement('div'); tipEl.className = 'tip'; tipEl.setAttribute('role', 'tooltip'); document.body.appendChild(tipEl); }
+    clearTimeout(tipHide);
+    tipEl.innerHTML = html; tipEl.hidden = false;
+    const r = target.getBoundingClientRect(), tw = tipEl.offsetWidth, th = tipEl.offsetHeight;
+    const x = Math.max(8, Math.min(innerWidth - tw - 8, r.left + r.width / 2 - tw / 2));
+    const y = r.top - th - 8 < 8 ? r.bottom + 8 : r.top - th - 8;
+    tipEl.style.left = x + 'px'; tipEl.style.top = y + 'px';
+  }
+  function tipOff(delay) { clearTimeout(tipTimer); clearTimeout(tipHide); tipHide = setTimeout(() => { if (tipEl) tipEl.hidden = true; }, delay || 0); }
+  ui.attachTip = function (node, html) {
+    node.addEventListener('pointerenter', (e) => { if (e.pointerType === 'mouse') tipShow(node, html); });
+    node.addEventListener('pointerleave', (e) => { if (e.pointerType === 'mouse') tipOff(); });
+    node.addEventListener('pointerdown', (e) => { if (e.pointerType === 'mouse') return; clearTimeout(tipTimer); tipTimer = setTimeout(() => tipShow(node, html), 300); });
+    node.addEventListener('pointerup', (e) => { if (e.pointerType === 'mouse') return; if (tipEl && !tipEl.hidden) tipOff(700); else { clearTimeout(tipTimer); tipShow(node, html); tipOff(1400); } });
+    node.addEventListener('pointercancel', () => tipOff());
+    node.addEventListener('contextmenu', (e) => e.preventDefault());
+    node.addEventListener('focus', () => tipShow(node, html));
+    node.addEventListener('blur', () => tipOff());
+  };
+
+  // ---- how to get stronger (after a defeat): tips from the hero's current state, most with a one-tap fix
+  function bestUpgrades() {
+    const p = G.profile, out = {};
+    p.inventory.filter((i) => i.kind === 'gear').forEach((it) => {
+      if (!isBetter(it)) return;
+      const cur = out[it.slot];
+      if (!cur) { out[it.slot] = it; return; }
+      const save = p.equipped[it.slot]; p.equipped[it.slot] = cur; if (isBetter(it)) out[it.slot] = it; p.equipped[it.slot] = save;
+    });
+    return Object.values(out);
+  }
+  function strongerTips(area) {
+    const p = G.profile, tips = [];
+    const leave = (then) => () => { closeSheet(); ui.close(true); G.game.exitToHub(); ui.show('hub'); if (then) then(); };
+    if (p.attrPoints > 0) tips.push({ t: `Spend ${p.attrPoints} attribute point${p.attrPoints > 1 ? 's' : ''}`, d: 'Unspent points do nothing. The recommended split suits your hero.', act: 'Spend now', go: () => { G.autoAttrs(p); syncRunStats(); } });
+    if (p.skillPoints > 0 && learnableSkills()) tips.push({ t: `Spend ${p.skillPoints} skill point${p.skillPoints > 1 ? 's' : ''}`, d: 'Higher skill ranks hit harder and cost less to use.', act: 'Spend now', go: () => { G.autoSkills(p); ui.refreshSkillButtons(); } });
+    const up = bestUpgrades();
+    if (up.length) tips.push({ t: `Wear ${up.length} better item${up.length > 1 ? 's' : ''} from your bag`, d: up.map((i) => i.name).join(', '), act: 'Equip best', go: () => { up.forEach((i) => G.equip(p, i.id)); syncRunStats(); } });
+    const empty = ['weapon', 'armor', 'accessory'].filter((k) => !p.equipped[k]);
+    if (empty.length && !up.length) tips.push({ t: 'Fill your empty gear slots', d: 'No ' + empty.map((k) => SLOT_NAMES[k].toLowerCase()).join(' or ') + ' equipped. The merchant sells gear.', act: 'Visit shop', go: leave(() => ui.open('shop')), leaves: true });
+    if (area && p.level < area.level) {
+      const prev = G.AREAS.filter((a) => !a.endless && a.id !== area.id && p.areas[a.id] && p.areas[a.id].unlocked && a.level <= p.level + 1).pop();
+      tips.push({ t: `Level up first: you are Lv ${p.level}, this area expects Lv ${area.level}`, d: prev ? `Replay ${prev.name} for experience and loot.` : 'Clear earlier areas for experience and loot.', act: prev ? 'Replay ' + prev.name : null, go: prev ? () => { closeSheet(); ui.close(true); G.game.exitToHub(); G.game.startArea(prev.id); } : null, leaves: true });
+    }
+    const hp = G.invCount(p, 'hpPotion');
+    if (hp < 3) tips.push({ t: hp ? `Only ${hp} health potion${hp > 1 ? 's' : ''} left` : 'Out of health potions', d: 'Carry at least 5. They cost ' + C.SHOP.hpPotion + 'g at the merchant.', act: 'Visit shop', go: leave(() => ui.open('shop')), leaves: true });
+    const eq = ['weapon', 'armor', 'accessory'].map((k) => p.equipped[k]).filter(Boolean);
+    if (eq.length && eq.every((i) => i.rarity === 'common')) tips.push({ t: 'Hunt for better gear', d: 'Elites and bosses drop Uncommon gear or better. Check the merchant too: its wares change when you restock.' });
+    tips.push({ t: 'Fight smart', d: 'Keep moving so groups cannot surround you. Use skills as soon as they are ready, save the ultimate for a big wave, and drink a potion before your health runs low.' });
+    return tips;
+  }
+  function strongerSheet(area) {
+    const card = $('sheet-card');
+    card.innerHTML = ''; card.classList.remove('menu-card');
+    card.appendChild(el('<div><h4>How to get stronger</h4><p class="note">Fix these, then try again.</p></div>'));
+    const list = el('<div class="tips"></div>');
+    strongerTips(area).forEach((t) => {
+      const row = el(`<div class="tip-row${t.act ? ' has-act' : ''}"><div class="grow"><b>${esc(t.t)}</b><span>${esc(t.d)}</span></div></div>`);
+      if (t.act) row.appendChild(btn(t.act, 'small primary', () => {
+        t.go(); G.save(); ui.updateBadges();
+        if (t.leaves) return;
+        ui.toast('Done', 'good'); strongerSheet(area);
+      }));
+      list.appendChild(row);
+    });
+    card.appendChild(list);
+    const acts = el('<div class="sheet-actions" style="margin-top:12px"></div>');
+    acts.appendChild(btn('Close', 'ghost', closeSheet));
+    card.appendChild(acts);
+    $('sheet').hidden = false;
+  }
+
   // ---- result
   ui.showResult = function (result, run) {
     G.input.reset();
@@ -1003,7 +1078,17 @@
     body.appendChild(list);
     if (r.items.length) {
       body.appendChild(el('<div class="section-title">Loot</div>'));
-      body.appendChild(el(`<div class="card stack">${r.items.map((it) => `<div style="color:${G.rarityOf(it).color};font-weight:700">${esc(it.name)} <span class="tiny muted">${G.rarityOf(it).name} ${SLOT_NAMES[it.slot]}</span></div>`).join('')}</div>`));
+      const grid = el('<div class="loot-grid"></div>');
+      r.items.forEach((it) => {
+        const gear = it.kind !== 'consumable' && it.slot, rar = gear ? G.rarityOf(it) : null;
+        const name = gear ? it.name : (G.CONSUMABLES[it.key] || {}).name || 'Item';
+        const cell = el(`<div class="loot-cell${gear ? ' r-' + it.rarity : ''}" role="img" tabindex="0" style="--rc:${rar ? rar.color : '#b9aee0'}">${G.itemIconHTML(it, 40) || `<span class="tag">${gear ? SLOT_TAG[it.slot] : 'USE'}</span>`}</div>`);
+        cell.setAttribute('aria-label', name);
+        ui.attachTip(cell, `<b style="color:${rar ? rar.color : '#fbf4ff'}">${esc(name)}</b>${gear ? `<small>${rar.name} ${SLOT_NAMES[it.slot]}</small>` : ''}`);
+        grid.appendChild(cell);
+      });
+      body.appendChild(grid);
+      body.appendChild(el(`<p class="tiny muted loot-hint">${matchMedia('(hover: hover)').matches ? 'Hover' : 'Press and hold'} an item to see its name.</p>`));
     }
     if (claimable()) body.appendChild(el(`<p class="note" style="color:var(--gold-2)">You have ${claimable()} quest reward(s) to claim in the Journal.</p>`));
     const acts = el('<div class="sheet-actions" style="margin-top:14px"></div>');
@@ -1015,6 +1100,12 @@
       if (nextOpen) { const nb = btn('', 'primary next-btn', () => { ui.close(true); G.game.exitToHub(); G.game.startArea(next.id); });
         nb.innerHTML = `Next area<small>${esc(next.name)}</small>`; nb.setAttribute('aria-label', 'Next area: ' + next.name); acts.appendChild(nb); }
     } else {
+      if (result === 'defeat') {
+        const n = strongerTips(run.area).filter((t) => t.act).length;
+        const sb = btn('', 'stronger-btn', () => strongerSheet(run.area));
+        sb.innerHTML = `How to get stronger${n ? `<b class="sb-n">${n}</b>` : ''}`;
+        body.appendChild(sb);
+      }
       acts.appendChild(btn('Retry', '', () => { const id = run.area.id; ui.close(true); G.game.exitToHub(); G.game.startArea(id); }));
       acts.appendChild(btn('World Map', 'primary', toMap));
     }
